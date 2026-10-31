@@ -15,7 +15,7 @@ Buffer.prototype.writeUInt32LE=function(v,p){new DataView(this.buffer,this.byteO
 
 const cfg=await (await fetch('./config.json',{cache:'no-store'})).json(),proto=cfg.wsProtocol.packet;
 const colors={'21':'#baff41','55':'#58caff','56':'#ffb35b','85':'#c999ff'},cars=new Map();
-let raceConfig=null,pending=Buffer.alloc(0),frames=0,lastFrame=0,error=null,official=null,recording=false;
+let raceConfig={raceStartTime:Date.parse(cfg.sessionInfo.race_start_timestamp+'Z'),raceFinishTime:Date.parse(cfg.sessionInfo.race_end_timestamp+'Z'),raceMode:cfg.sessionInfo.race_mode},pending=Buffer.alloc(0),frames=0,lastFrame=0,error=null,official=null,recording=false;
 for(const e of cfg.entries)cars.set(e.device_serial,{serial:e.device_serial,number:e.entry_num,name:e.driver_name,team:e.team_name,focus:/\bzic\b/i.test(e.team_name),color:colors[e.entry_num]??'#8393a7',can:{},history:[],lapOffset:e.num_laps_offset??0,positionHistory:[]});
 function calculateLiveRanks(all,start,now){
   if(!Number.isFinite(start)||start<=0||start>now)return new Map();
