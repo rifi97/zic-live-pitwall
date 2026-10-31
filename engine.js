@@ -127,7 +127,7 @@ let refreshing=false;
 async function refreshConfiguration(){
  if(refreshing)return;refreshing=true;
  try{const r=await fetch('./config.json?v='+Date.now(),{cache:'no-store'});if(!r.ok)return;const next=await r.json();if(configurationKey(next)===configurationKey(cfg))return;
-  if(!next.sessionInfo?.id||!next.entries?.length||!next.wsUrl?.startsWith('wss://'))throw Error('Invalid session configuration');
+  if(!next.sessionInfo?.id||!Array.isArray(next.entries)||(next.entries.length===0&&next.sessionInfo.num_entries!==0)||!next.wsUrl?.startsWith('wss://'))throw Error('Invalid session configuration');
   clearTimeout(reconnectTimer);const previous=socket;socket=null;if(previous)previous.close();
   cfg=next;proto=cfg.wsProtocol.packet;cars.clear();cursor.clear();official=null;error=null;lastFrame=0;
   raceConfig={raceStartTime:Date.parse(cfg.sessionInfo.race_start_timestamp+'Z'),raceFinishTime:Date.parse(cfg.sessionInfo.race_end_timestamp+'Z'),raceMode:cfg.sessionInfo.race_mode};
