@@ -13,7 +13,7 @@ for(const [name,fn,size] of [['UInt8','getUint8',1],['Int8','getInt8',1],['UInt1
 Buffer.prototype.writeUInt32BE=function(v,p){new DataView(this.buffer,this.byteOffset,this.byteLength).setUint32(p,v,false)};
 Buffer.prototype.writeUInt32LE=function(v,p){new DataView(this.buffer,this.byteOffset,this.byteLength).setUint32(p,v,true)};
 
-const cfg=await (await fetch('./config.json',{cache:'no-store'})).json(),proto=cfg.wsProtocol.packet;
+let cfg=await (await fetch('./config.json',{cache:'no-store'})).json(),proto=cfg.wsProtocol.packet;
 const colors={'21':'#baff41','55':'#58caff','56':'#ffb35b','85':'#c999ff'},cars=new Map();
 let raceConfig={raceStartTime:Date.parse(cfg.sessionInfo.race_start_timestamp+'Z'),raceFinishTime:Date.parse(cfg.sessionInfo.race_end_timestamp+'Z'),raceMode:cfg.sessionInfo.race_mode},pending=Buffer.alloc(0),frames=0,lastFrame=0,error=null,official=null,recording=false;
 for(const e of cfg.entries)cars.set(e.device_serial,{serial:e.device_serial,number:e.entry_num,name:e.driver_name,team:e.team_name,focus:/\bzic\b/i.test(e.team_name),color:colors[e.entry_num]??'#8393a7',can:{},history:[],lapOffset:e.num_laps_offset??0,positionHistory:[]});
@@ -47,7 +47,7 @@ function packet(b,received){
       v[key]=key==='deviceSerial'?BigInt(val).toString(16).padStart(16,'0'):Number(val)*(s.scale??1)+(s.offset??0);
     }
     let c=cars.get(v.deviceSerial);
-    if(!c){c={serial:v.deviceSerial,number:'?',name:'미확인 차량',team:'',focus:false,color:'#8393a7',can:{},history:[]};cars.set(v.deviceSerial,c);}
+    if(!c)return; // Only show vehicles identified in the current session entry list.
     const entry=cfg.entries.find(e=>e.device_serial===v.deviceSerial),dbc=cfg.dbcList[String(entry?.dbc_id)];
     if(dbc&&v.numSignals&&def.signals.signal){
       for(let i=0;i<v.numSignals;i++){
@@ -82,7 +82,7 @@ function packet(b,received){
     if(d.cmdType==='rmResult'){
       official={class:d.ClassName,session:d.SessionName,received_ms:received};
       // Car numbers repeat between classes: only explicitly N1-labelled ranks qualify.
-      if(/\bN1\b/i.test(d.ClassName??'')){
+      if((d.ClassName??'').match(/\bN\d\b/i)?.[0]?.toUpperCase()===(cfg.sessionInfo.session_name??'').match(/\bN\d\b/i)?.[0]?.toUpperCase()){
         for(const c of cars.values()){const r=d.ranking?.find(r=>Number(r.RacerNumber)===Number(c.number)&&normalizeDriverName(r.RacerName)===normalizeDriverName(c.name));if(r)c.rank={position:r.RacePosition,last_ms:r.LastLap,best_ms:r.BestLapTime,laps:r.Laps,received_ms:received,class:d.ClassName};}
       }
     }
@@ -114,7 +114,7 @@ let socket,clientId='',subscribed=false,retry=0,reconnectTimer,closed=false;
 const cursor=new Map();
 function send(cmd){if(socket?.readyState!==WebSocket.OPEN)return;const text=Buffer.from(JSON.stringify(cmd)),b=Buffer.alloc(text.length+10);b.writeUInt32BE(Number(proto.jsonPacket.header.value),proto.jsonPacket.header.pos);b.writeUInt32LE(text.length,proto.jsonPacket.payloadLength.pos);text.copy(b,proto.jsonPacket.jsonString.pos);socket.send(b)}
 function handleControl(b){const header=b.readUInt32BE(0);if(header===Number(proto.setClientId.header.value)){clientId=b.subarray(proto.setClientId.clientId.pos,proto.setClientId.clientId.pos+8).toString('hex');send({clientId,cmdType:'reqTimeSync',timestamp1:Date.now(),timestamp2:null,timestamp3:null})}else if(header===Number(proto.jsonPacket.header.value)){const d=JSON.parse(b.subarray(proto.jsonPacket.jsonString.pos).toString().replace(/\0+$/,''));if(d.cmdType==='reqTimeSync'&&!subscribed){subscribed=true;send({clientId,cmdType:'reqSvc',serviceType:'raceEvent',serviceName:cfg.urlParams.seriesKey,sessionId:cfg.sessionInfo.id})}}}
-function connect(){if(closed)return;subscribed=false;clientId='';pending=Buffer.alloc(0);socket=new WebSocket(cfg.wsUrl);socket.binaryType='arraybuffer';socket.onopen=()=>{retry=0;onStatus('connected')};socket.onmessage=e=>{lastFrame=Date.now();frames++;if(recording)saveFrame(e.data,lastFrame);try{frame(Buffer.from(e.data),lastFrame)}catch(e){error=e.message;pending=Buffer.alloc(0)}};socket.onerror=()=>socket.close();socket.onclose=()=>{onStatus('reconnecting');clearTimeout(reconnectTimer);reconnectTimer=setTimeout(connect,Math.min(15000,1000*2**retry++))}}
+function connect(){if(closed)return;subscribed=false;clientId='';pending=Buffer.alloc(0);const current=new WebSocket(cfg.wsUrl);socket=current;current.binaryType='arraybuffer';current.onopen=()=>{if(socket!==current)return;retry=0;onStatus('connected')};current.onmessage=e=>{if(socket!==current)return;lastFrame=Date.now();frames++;if(recording)saveFrame(e.data,lastFrame);try{frame(Buffer.from(e.data),lastFrame)}catch(e){error=e.message;pending=Buffer.alloc(0)}};current.onerror=()=>current.close();current.onclose=()=>{if(socket!==current)return;onStatus('reconnecting');clearTimeout(reconnectTimer);reconnectTimer=setTimeout(connect,Math.min(15000,1000*2**retry++))}}
 connect();setInterval(()=>{if(clientId)send({clientId,cmdType:'keepAlive'});if(lastFrame&&Date.now()-lastFrame>45000&&socket.readyState===WebSocket.OPEN)socket.close()},30000);
 setInterval(()=>{onState(snapshot(true,cursor))},100);
 let db,recordId,recordCount=0,queue=[],flushing=Promise.resolve();
@@ -122,5 +122,21 @@ async function database(){if(db)return db;db=await new Promise((resolve,reject)=
 function flush(){if(!queue.length)return flushing;const batch=queue;queue=[];flushing=flushing.then(async()=>{const d=await database();await new Promise((resolve,reject)=>{const t=d.transaction('chunks','readwrite');for(const row of batch)t.objectStore('chunks').add(row);t.oncomplete=resolve;t.onerror=()=>reject(t.error)})});return flushing}
 function saveFrame(bytes,at){let binary='';const arr=new Uint8Array(bytes);for(let i=0;i<arr.length;i+=8192)binary+=String.fromCharCode(...arr.subarray(i,i+8192));queue.push({recordId,line:JSON.stringify({kind:'frame',received_unix_ms:at,data:btoa(binary),encoding:'base64'})+'\n'});recordCount++;if(queue.length>=100)flush().catch(e=>{recording=false;onStatus('기록 저장 오류: '+e.message)})}
 setInterval(()=>{if(recording)flush()},1000);
+const configurationKey=c=>JSON.stringify([c.wsUrl,c.sessionInfo.id,c.entries.map(e=>[e.device_serial,e.entry_num,e.driver_name,e.team_name]),c.wsProtocol]);
+let refreshing=false;
+async function refreshConfiguration(){
+ if(refreshing)return;refreshing=true;
+ try{const r=await fetch('./config.json?v='+Date.now(),{cache:'no-store'});if(!r.ok)return;const next=await r.json();if(configurationKey(next)===configurationKey(cfg))return;
+  if(!next.sessionInfo?.id||!next.entries?.length||!next.wsUrl?.startsWith('wss://'))throw Error('Invalid session configuration');
+  clearTimeout(reconnectTimer);const previous=socket;socket=null;if(previous)previous.close();
+  cfg=next;proto=cfg.wsProtocol.packet;cars.clear();cursor.clear();official=null;error=null;lastFrame=0;
+  raceConfig={raceStartTime:Date.parse(cfg.sessionInfo.race_start_timestamp+'Z'),raceFinishTime:Date.parse(cfg.sessionInfo.race_end_timestamp+'Z'),raceMode:cfg.sessionInfo.race_mode};
+  for(const e of cfg.entries)cars.set(e.device_serial,{serial:e.device_serial,number:e.entry_num,name:e.driver_name,team:e.team_name,focus:/\bzic\b/i.test(e.team_name),color:colors[e.entry_num]??'#8393a7',can:{},history:[],lapOffset:e.num_laps_offset??0,positionHistory:[]});
+  if(recording)queue.push({recordId,line:JSON.stringify({kind:'config',at:new Date().toISOString(),config:cfg})+'\n'});
+  onState(snapshot(true,cursor));connect();
+ }catch(e){onStatus('설정 갱신 확인: '+e.message)}finally{refreshing=false}
+}
+setInterval(refreshConfiguration,60000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshConfiguration()});
+
 return {async startRecording(){await database();recordId=new Date().toISOString();recordCount=0;queue.push({recordId,line:JSON.stringify({kind:'config',at:recordId,config:cfg})+'\n'});recording=true;return recordId},async stopRecording(){recording=false;await flush();const d=await database(),parts=[];await new Promise((resolve,reject)=>{const t=d.transaction('chunks','readonly'),r=t.objectStore('chunks').openCursor();r.onsuccess=()=>{const c=r.result;if(!c)return resolve();if(c.value.recordId===recordId)parts.push(c.value.line);c.continue()};r.onerror=()=>reject(r.error)});const blob=new Blob(parts,{type:'application/x-ndjson'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='zic-race-'+recordId.replaceAll(':','-')+'.jsonl';a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);return {frames:recordCount,bytes:blob.size}}};
 };
