@@ -35,6 +35,10 @@ function calculateLiveRanks(all,start,now){
 }
 
 const types={uint8:['readUInt8',1],int8:['readInt8',1],uint16:['readUInt16',2],int16:['readInt16',2],uint32:['readUInt32',4],int32:['readInt32',4],uint64:['readBigUInt64',8]};
+// Exact official-session mapping verified for the 2026-11-01 N1 final.
+// Unknown sessions deliberately fall back to visibly labelled GPS estimates.
+const officialSessions={'cbf255e0-31ec-439c-a697-944df4227775':'R6 결승 (일)'};
+function officialSessionMatches(d){const expected=officialSessions[cfg.sessionInfo.id];return !!expected&&String(d.SessionName??'').trim()===expected&&(d.ClassName??'').match(/\bN\d\b/i)?.[0]?.toUpperCase()===(cfg.sessionInfo.session_name??'').match(/\bN\d\b/i)?.[0]?.toUpperCase();}
 function normalizeDriverName(name){return String(name??'').normalize('NFKC').replace(/\s*\(C\)\s*$/i,'').replace(/\s+/g,'').trim();}
 function packet(b,received){
   const type=Object.keys(proto).find(k=>Number(proto[k].header.value)===b.readUInt32BE(0));
@@ -81,9 +85,12 @@ function packet(b,received){
     if(d.cmdType==='sessionConfig'&&d.sessionId===cfg.sessionInfo.id)raceConfig=d;
     if(d.cmdType==='rmResult'){
       official={class:d.ClassName,session:d.SessionName,received_ms:received};
-      // Car numbers repeat between classes: only explicitly N1-labelled ranks qualify.
-      if((d.ClassName??'').match(/\bN\d\b/i)?.[0]?.toUpperCase()===(cfg.sessionInfo.session_name??'').match(/\bN\d\b/i)?.[0]?.toUpperCase()){
-        for(const c of cars.values()){const r=d.ranking?.find(r=>Number(r.RacerNumber)===Number(c.number)&&normalizeDriverName(r.RacerName)===normalizeDriverName(c.name));if(r)c.rank={position:r.RacePosition,last_ms:r.LastLap,best_ms:r.BestLapTime,laps:r.Laps,received_ms:received,class:d.ClassName};}
+      // Clear absent/mismatched rows too: never retain a prior result as current.
+      const matches=officialSessionMatches(d);
+      for(const c of cars.values()){
+        c.rank=null;
+        const r=matches&&Array.isArray(d.ranking)?d.ranking.find(r=>Number(r.RacerNumber)===Number(c.number)&&normalizeDriverName(r.RacerName)===normalizeDriverName(c.name)):null;
+        if(r)c.rank={position:r.RacePosition,last_ms:r.LastLap,best_ms:r.BestLapTime,laps:r.Laps,received_ms:received,class:d.ClassName,session_id:cfg.sessionInfo.id,session_name:d.SessionName};
       }
     }
   }

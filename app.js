@@ -50,7 +50,7 @@ function ingestPositions(next){
 }
 const fmt=(v,n=0)=>Number.isFinite(v)?v.toFixed(n):'—',clamp=(v,max)=>Math.max(0,Math.min(max,v??0));
 function lap(ms){if(!Number.isFinite(ms)||ms<=0)return'—';return Math.floor(ms/60000)+':'+(ms%60000/1000).toFixed(3).padStart(6,'0')}
-for(const c of team){const card=document.createElement('article');card.className='driver';card.id='driver-'+c.number;card.style.setProperty('--accent',c.color);card.innerHTML=`<div class="driver-head"><span class="driver-number">${c.number}</span><div class="driver-identity"><h3>${c.name}</h3></div><span class="age">연결 대기</span></div><div class="speed-row"><span class="speed">—</span><span class="speed-unit">KM/H</span><svg class="spark" viewBox="0 0 120 44" preserveAspectRatio="none"><path fill="none" stroke="${c.color}" stroke-width="1.8"/></svg></div><div class="rpm-row"><span>엔진</span><div><strong class="rpm">—</strong> rpm</div></div><div class="rpm-bar"><i></i></div><div class="pedals"><div><div class="pedal-label">가속 <b class="throttle">—</b></div><div class="pedal-bar throttle"><i></i></div></div><div><div class="pedal-label">브레이크 <b class="brake">—</b></div><div class="pedal-bar brake"><i></i></div></div></div><div class="sensors"><div class="sensor"><small>조향</small><b class="steer">—</b><em>°</em></div><div class="sensor"><small>냉각수</small><b class="coolant">—</b><em>℃</em></div><div class="sensor"><small>오일</small><b class="oil">—</b><em>℃</em></div></div><div class="driver-bottom"><div class="rank" title="GPS 주행 기준으로 계산한 순위">순위<b>—</b></div><div>최근 랩<b class="last-lap">—</b></div><div>최고 랩<b class="best-lap">—</b></div><div>기어<b class="gear">—</b></div></div>`;$('cards').append(card)}
+for(const c of team){const card=document.createElement('article');card.className='driver';card.id='driver-'+c.number;card.style.setProperty('--accent',c.color);card.innerHTML=`<div class="driver-head"><span class="driver-number">${c.number}</span><div class="driver-identity"><h3>${c.name}</h3></div><span class="age">연결 대기</span></div><div class="speed-row"><span class="speed">—</span><span class="speed-unit">KM/H</span><svg class="spark" viewBox="0 0 120 44" preserveAspectRatio="none"><path fill="none" stroke="${c.color}" stroke-width="1.8"/></svg></div><div class="rpm-row"><span>엔진</span><div><strong class="rpm">—</strong> rpm</div></div><div class="rpm-bar"><i></i></div><div class="pedals"><div><div class="pedal-label">가속 <b class="throttle">—</b></div><div class="pedal-bar throttle"><i></i></div></div><div><div class="pedal-label">브레이크 <b class="brake">—</b></div><div class="pedal-bar brake"><i></i></div></div></div><div class="sensors"><div class="sensor"><small>조향</small><b class="steer">—</b><em>°</em></div><div class="sensor"><small>냉각수</small><b class="coolant">—</b><em>℃</em></div><div class="sensor"><small>오일</small><b class="oil">—</b><em>℃</em></div></div><div class="driver-bottom"><div class="rank" title="GPS 주행 기준으로 계산한 추정 순위"><span class="rank-label">GPS 추정</span><b>—</b></div><div>최근 랩<b class="last-lap">—</b></div><div>최고 랩<b class="best-lap">—</b></div><div>기어<b class="gear">—</b></div></div>`;$('cards').append(card)}
 const canvas=$('map'),ctx=canvas.getContext('2d'),image=new Image();
 let mapSize={width:0,height:0},mapVisible=true;
 // Geometry changes on resize, not on every animation frame or scroll tick.
@@ -71,22 +71,19 @@ function draw(){
   ctx.globalAlpha=now-c.received_ms>2500?.25:.85;
   ctx.fillStyle=c.focus?c.color:'#8ca0ae';ctx.beginPath();ctx.arc(cx,cy,3.4,0,Math.PI*2);ctx.fill();
  }
- // Keep number labels apart without changing the actual position or marker size.
- const labels=[];ctx.font='10px system-ui';ctx.textBaseline='alphabetic';
- for(const {c,point:[cx,cy]} of [...visible].sort((a,b)=>Number(b.c.focus)-Number(a.c.focus))){
+ // Keep each number immediately above its car; no displaced labels or leader lines.
+ ctx.font='10px system-ui';ctx.textBaseline='alphabetic';
+ for(const {c,point:[cx,cy]} of visible){
   const tw=ctx.measureText(c.number).width;
-  const offsets=[[7,-7],[7,14],[-tw-7,-7],[-tw-7,14],[7,-21],[7,28],[-tw-7,-21],[-tw-7,28]];
-  let label=null;
-  for(const [dx,dy] of offsets){const box={x:cx+dx-2,y:cy+dy-10,w:tw+4,h:13};
-   if(box.x<2||box.y<2||box.x+box.w>r.width-2||box.y+box.h>r.height-2)continue;
-   if(labels.some(b=>box.x<b.x+b.w&&box.x+box.w>b.x&&box.y<b.y+b.h&&box.y+box.h>b.y))continue;
-   if(visible.some(({point:[px,py]})=>px>box.x-4&&px<box.x+box.w+4&&py>box.y-4&&py<box.y+box.h+4))continue;
-   label={...box,dx,dy};break;
-  }
-  if(!label)continue;labels.push(label);ctx.globalAlpha=now-c.received_ms>2500?.35:.95;
-  if(Math.abs(label.dy)>15){ctx.strokeStyle=c.focus?c.color:'#8ca0ae';ctx.lineWidth=.5;ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx+label.dx+(label.dx<0?tw:0),cy+label.dy-4);ctx.stroke();}
-  ctx.strokeStyle='#141b21';ctx.lineWidth=3;ctx.strokeText(c.number,cx+label.dx,cy+label.dy);ctx.fillStyle=c.focus?c.color:'#a6b6c1';ctx.fillText(c.number,cx+label.dx,cy+label.dy);
+  ctx.globalAlpha=now-c.received_ms>2500?.35:.95;
+  ctx.strokeStyle='#141b21';ctx.lineWidth=3;ctx.strokeText(c.number,cx-tw/2,cy-7);ctx.fillStyle=c.focus?c.color:'#a6b6c1';ctx.fillText(c.number,cx-tw/2,cy-7);
  }ctx.globalAlpha=1;
+}
+function renderRanking(card,c,now){const set=(q,v)=>setText(card.querySelector(q),v);
+ const validRank=c?.rank&&c?.rank.session_id===state.session?.id&&now-c?.rank.received_ms>=0&&now-c?.rank.received_ms<10000;
+ const officialPosition=Number(c?.rank?.position),useOfficial=validRank&&Number.isInteger(officialPosition)&&officialPosition>0;
+ set('.rank-label',useOfficial?'공식 순위':'GPS 추정');card.querySelector('.rank').title=useOfficial?'공식 타이밍 피드 · '+c?.rank.session_name:'공식 순위 대기 · GPS 주행 기준으로 계산한 추정 순위';
+ set('.rank b',useOfficial?'P'+officialPosition:c?.live_rank?.position?'P'+c?.live_rank.position:'—');set('.last-lap',lap(validRank?c?.rank.last_ms:null));set('.best-lap',lap(validRank?c?.rank.best_ms:null));
 }
 function render(){if(!state)return;const now=serverNow(),age=now-state.last_frame_ms;
  setText($('map-quality'),'실시간 위치');$('map-quality').title='GPS 시각 기준 보간 · 표시 버퍼 '+fmt(motionBufferMs/1000,2)+'초';
@@ -95,14 +92,14 @@ function render(){if(!state)return;const now=serverNow(),age=now-state.last_fram
  setText($('session'),state.session?.session_name??'LIVE');setText($('class-label'),state.session?.session_name?.match(/N\d+(?:-[A-Z])?/i)?.[0]??'HNF');setText($('record-status'),state.recording?'기기에 기록 중':'기록은 이 기기에만 저장됩니다');setText($('last-update'),state.last_frame_ms?'최근 수신 '+fmt(Math.max(0,age)/1000,1)+'초 전':'데이터 수신 대기');
  const nf=state.official_feed;setText($('feed-note'),nf&&nf.class?.match(/\bN\d\b/i)?.[0]?.toUpperCase()===state.session?.session_name?.match(/\bN\d\b/i)?.[0]?.toUpperCase()?'순위 · '+nf.class+' · '+nf.session:'순위 대기 · '+(nf?'현재 순위 피드: '+nf.class:'위치·차량 센서 수신'));
  let active=0;
- for(const t of team){const card=$('driver-'+t.number),c=state.cars.find(c=>c.number===t.number&&c.focus);if(!c?.data){card.classList.add('stale');setText(card.querySelector('.age'),c?'데이터 대기':'현재 경기 미출전');setAttribute(card.querySelector('.age'),'class','age');for(const q of ['.speed','.rpm','.throttle','.brake','.steer','.coolant','.oil','.gear','.rank b','.last-lap','.best-lap'])setText(card.querySelector(q),'—');for(const bar of card.querySelectorAll('.rpm-bar i,.pedal-bar i'))setWidth(bar,'0%');setAttribute(card.querySelector('.spark path'),'d','');continue;}const elapsed=now-c.received_ms,fresh=elapsed<2500;if(fresh)active++;card.classList.toggle('stale',!fresh);
+ for(const t of team){const card=$('driver-'+t.number),c=state.cars.find(c=>c.number===t.number&&c.focus);renderRanking(card,c,now);if(!c?.data){card.classList.add('stale');setText(card.querySelector('.age'),c?'데이터 대기':'현재 경기 미출전');setAttribute(card.querySelector('.age'),'class','age');for(const q of ['.speed','.rpm','.throttle','.brake','.steer','.coolant','.oil','.gear'])setText(card.querySelector(q),'—');for(const bar of card.querySelectorAll('.rpm-bar i,.pedal-bar i'))setWidth(bar,'0%');setAttribute(card.querySelector('.spark path'),'d','');continue;}const elapsed=now-c.received_ms,fresh=elapsed<2500;if(fresh)active++;card.classList.toggle('stale',!fresh);
  const set=(q,v)=>setText(card.querySelector(q),v),can=k=>c.can?.[k]?.value??null;
  set('.age',fresh?'LIVE · '+Math.round(Math.max(0,elapsed))+' ms':(elapsed<10000?'지연 · ':'수신 대기 · ')+fmt(elapsed/1000,1)+'s');setAttribute(card.querySelector('.age'),'class','age '+(fresh?'live':''));
  card.title=fresh?'최근 수신한 차량 데이터':'차량 데이터 지연: 마지막 수신값을 표시합니다. 위치를 예측해 움직이지 않습니다.';
  set('.speed',fmt(c.data.speed));const rpm=can('_sig_EngRPM'),throttle=can('_sig_ThrPos'),brake=can('_sig_BrkPres');set('.rpm',fmt(rpm));set('.throttle',Number.isFinite(throttle)?fmt(clamp(throttle,100))+'%':'—');set('.brake',Number.isFinite(brake)?fmt(Math.max(0,brake),1)+' bar':'—');
  setWidth(card.querySelector('.rpm-bar i'),clamp(rpm/8000*100,100)+'%');setWidth(card.querySelector('.pedal-bar.throttle i'),clamp(throttle,100)+'%');setWidth(card.querySelector('.pedal-bar.brake i'),clamp(brake/150*100,100)+'%');
  set('.steer',fmt(can('_sig_AngleSteer'),1));set('.coolant',fmt(can('_sig_EngCoolTemp'),1));set('.oil',fmt(can('_sig_EngOilTemp'),1));set('.gear',fmt(can('_sig_Gear')));
- const validRank=c.rank&&now-c.rank.received_ms<10000;set('.rank b',c.live_rank?.position?'P'+c.live_rank.position:'—');set('.last-lap',lap(validRank?c.rank.last_ms:null));set('.best-lap',lap(validRank?c.rank.best_ms:null));
+
  const hist=c.history??[];if(hist.length>1){const span=Math.max(30,...hist.map(p=>p.speed??0)),d=hist.map((p,i)=>(i?'L':'M')+(i/(hist.length-1)*120).toFixed(1)+','+(42-clamp(p.speed/span,1)*38).toFixed(1)).join(' ');setAttribute(card.querySelector('.spark path'),'d',d)}
  }const entered=team.filter(t=>state.cars.some(c=>c.focus&&c.number===t.number&&c.name===t.name)).length;setText($('team-status'),entered?active+'/'+entered+'대 수신'+(active<entered?' · '+(entered-active)+'대 대기':''):'현재 경기 팀 선수 미출전');
 }
