@@ -19,6 +19,7 @@ const context=vm.createContext({window:{},TextEncoder,TextDecoder,Uint8Array,Arr
  fetch:async()=>({ok:true,json:async()=>structuredClone(current)}),
  setInterval:(fn,ms)=>{timers.push({fn,ms})},setTimeout:()=>{},clearTimeout:()=>{},
  document:{addEventListener:()=>{}},performance});
+vm.runInContext(readFileSync(new URL('../leaderboard.js',import.meta.url),'utf8'),context);
 vm.runInContext(readFileSync(new URL('../engine.js',import.meta.url),'utf8'),context);
 await context.window.startDirectFeed(next=>{state=next},status=>statuses.push(status));
 const snapshot=timers.find(t=>t.ms===100).fn,refresh=timers.find(t=>t.ms===60000).fn;

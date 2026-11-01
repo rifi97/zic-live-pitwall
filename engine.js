@@ -17,21 +17,10 @@ let cfg=await (await fetch('./config.json',{cache:'no-store'})).json(),proto=cfg
 const colors={'21':'#baff41','55':'#58caff','56':'#ffb35b','85':'#c999ff'},cars=new Map();
 let raceConfig={raceStartTime:Date.parse(cfg.sessionInfo.race_start_timestamp+'Z'),raceFinishTime:Date.parse(cfg.sessionInfo.race_end_timestamp+'Z'),raceMode:cfg.sessionInfo.race_mode},pending=Buffer.alloc(0),frames=0,lastFrame=0,error=null,official=null,recording=false;
 for(const e of cfg.entries)cars.set(e.device_serial,{serial:e.device_serial,number:e.entry_num,name:e.driver_name,team:e.team_name,focus:/\bzic\b/i.test(e.team_name),color:colors[e.entry_num]??'#8393a7',can:{},history:[],lapOffset:e.num_laps_offset??0,positionHistory:[]});
-function calculateLiveRanks(all,start,now){
-  if(!Number.isFinite(start)||start<=0||start>now)return new Map();
-  const moving=all.filter(c=>c.data?.speed>40&&now-c.received_ms<2500);
-  if(!moving.length)return new Map();
-  const target=Math.min(...moving.map(c=>c.source_ms));
-  if(now-target>4000)return new Map();
-  const rows=all.filter(c=>c.data&&now-c.received_ms<2500).map(c=>{
-    const samples=c.positionHistory??[],a=[...samples].reverse().find(p=>p.t<=target),b=samples.find(p=>p.t>target);
-    let pos=a?.pos??c.data.posIdx;
-    if(a&&b&&b.t-a.t<=1500&&b.pos>=a.pos)pos=a.pos+(b.pos-a.pos)*(target-a.t)/(b.t-a.t);
-    const times=(c.lap_timestamps??[]).filter(t=>t>start&&t<target);
-    return {c,laps:times.length+(c.lapOffset??0),pos,time:times.length?times.at(-1)-start:0};
-  });
-  rows.sort((a,b)=>b.laps-a.laps||b.pos-a.pos||a.time-b.time||Number(a.c.number)-Number(b.c.number));
-  return new Map(rows.map((r,i)=>[r.c.serial,{position:i+1,source:'GPS progress estimate',received_ms:now,target_source_ms:target}]));
+let minSourceOffset=Infinity;
+function leaderboardAt(now){
+ const displayAt=now-(Number.isFinite(minSourceOffset)?minSourceOffset:0)-(cfg.urlParams?.delay??2500);
+ return window.ZicRaceLeaderboard.calculate([...cars.values()],raceConfig,displayAt,cfg.trackInfo?.id);
 }
 
 const types={uint8:['readUInt8',1],int8:['readInt8',1],uint16:['readUInt16',2],int16:['readInt16',2],uint32:['readUInt32',4],int32:['readInt32',4],uint64:['readBigUInt64',8]};
@@ -65,9 +54,11 @@ function packet(b,received){
     }
     const source=v.timestampH*4294967296+v.timestampL;
     c.data=v;c.source_ms=source;c.received_ms=received;
+    c.source_earliest=Math.min(c.source_earliest??Infinity,source);c.source_latest=Math.max(c.source_latest??0,source);minSourceOffset=Math.min(minSourceOffset,received-source);
     c.positionHistory??=[];
-    if(!c.positionHistory.length||source>c.positionHistory.at(-1).t)c.positionHistory.push({t:source,pos:v.posIdx,lat:v.lat,lon:v.lon,speed:v.speed,received_ms:received});
-    while(c.positionHistory.length>80)c.positionHistory.shift();
+    const point={t:source,pos:v.posIdx,lat:v.lat,lon:v.lon,speed:v.speed,received_ms:received};
+    let insert=c.positionHistory.findIndex(p=>p.t>=source);if(insert<0)c.positionHistory.push(point);else if(c.positionHistory[insert].t!==source)c.positionHistory.splice(insert,0,point);
+    while(c.positionHistory.length>2&&c.positionHistory[1].t<c.source_latest-180000)c.positionHistory.shift();
     if(c.focus){
       if(!c.history.length||source-c.history.at(-1).t>=200)c.history.push({t:source,speed:v.speed});
       while(c.history.length>150)c.history.shift();
@@ -106,8 +97,8 @@ function frame(b,received){
 }
 
 function snapshot(compact,positionCursor=null){const now=Date.now();
-  const liveRanks=calculateLiveRanks([...cars.values()],raceConfig?.raceStartTime,now);
-  for(const c of cars.values())c.live_rank=liveRanks.get(c.serial)??null;
+  const leaderboard=leaderboardAt(now),rows=new Map((leaderboard?.rows??[]).map(r=>[r.serial,r]));
+  for(const c of cars.values()){const row=rows.get(c.serial);c.live_rank=row?{...row,source:'JP-RACE map leaderboard algorithm',received_ms:now,target_source_ms:leaderboard.target_source_ms}:null;}
   const sensorNames=['_sig_EngRPM','_sig_ThrPos','_sig_BrkPres','_sig_AngleSteer','_sig_EngCoolTemp','_sig_EngOilTemp','_sig_Gear'];
   const payloadCars=compact?[...cars.values()].map(c=>{
     const since=positionCursor?.get(c.serial)??0;
@@ -136,7 +127,7 @@ async function refreshConfiguration(){
  try{const r=await fetch('./config.json?v='+Date.now(),{cache:'no-store'});if(!r.ok)return;const next=await r.json();if(configurationKey(next)===configurationKey(cfg))return;
   if(!next.sessionInfo?.id||!Array.isArray(next.entries)||(next.entries.length===0&&next.sessionInfo.num_entries!==0)||!next.wsUrl?.startsWith('wss://'))throw Error('Invalid session configuration');
   clearTimeout(reconnectTimer);const previous=socket;socket=null;if(previous)previous.close();
-  cfg=next;proto=cfg.wsProtocol.packet;cars.clear();cursor.clear();official=null;error=null;lastFrame=0;
+  cfg=next;proto=cfg.wsProtocol.packet;cars.clear();cursor.clear();official=null;error=null;lastFrame=0;minSourceOffset=Infinity;
   raceConfig={raceStartTime:Date.parse(cfg.sessionInfo.race_start_timestamp+'Z'),raceFinishTime:Date.parse(cfg.sessionInfo.race_end_timestamp+'Z'),raceMode:cfg.sessionInfo.race_mode};
   for(const e of cfg.entries)cars.set(e.device_serial,{serial:e.device_serial,number:e.entry_num,name:e.driver_name,team:e.team_name,focus:/\bzic\b/i.test(e.team_name),color:colors[e.entry_num]??'#8393a7',can:{},history:[],lapOffset:e.num_laps_offset??0,positionHistory:[]});
   if(recording)queue.push({recordId,line:JSON.stringify({kind:'config',at:new Date().toISOString(),config:cfg})+'\n'});

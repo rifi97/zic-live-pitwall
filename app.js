@@ -50,7 +50,7 @@ function ingestPositions(next){
 }
 const fmt=(v,n=0)=>Number.isFinite(v)?v.toFixed(n):'—',clamp=(v,max)=>Math.max(0,Math.min(max,v??0));
 function lap(ms){if(!Number.isFinite(ms)||ms<=0)return'—';return Math.floor(ms/60000)+':'+(ms%60000/1000).toFixed(3).padStart(6,'0')}
-for(const c of team){const card=document.createElement('article');card.className='driver';card.id='driver-'+c.number;card.style.setProperty('--accent',c.color);card.innerHTML=`<div class="driver-head"><span class="driver-number">${c.number}</span><div class="driver-identity"><h3>${c.name}</h3></div><span class="age">연결 대기</span></div><div class="speed-row"><span class="speed">—</span><span class="speed-unit">KM/H</span><svg class="spark" viewBox="0 0 120 44" preserveAspectRatio="none"><path fill="none" stroke="${c.color}" stroke-width="1.8"/></svg></div><div class="rpm-row"><span>엔진</span><div><strong class="rpm">—</strong> rpm</div></div><div class="rpm-bar"><i></i></div><div class="pedals"><div><div class="pedal-label">가속 <b class="throttle">—</b></div><div class="pedal-bar throttle"><i></i></div></div><div><div class="pedal-label">브레이크 <b class="brake">—</b></div><div class="pedal-bar brake"><i></i></div></div></div><div class="sensors"><div class="sensor"><small>조향</small><b class="steer">—</b><em>°</em></div><div class="sensor"><small>냉각수</small><b class="coolant">—</b><em>℃</em></div><div class="sensor"><small>오일</small><b class="oil">—</b><em>℃</em></div></div><div class="driver-bottom"><div class="rank" title="GPS 주행 기준으로 계산한 추정 순위"><span class="rank-label">GPS 추정</span><b>—</b></div><div>최근 랩<b class="last-lap">—</b></div><div>최고 랩<b class="best-lap">—</b></div><div>기어<b class="gear">—</b></div></div>`;$('cards').append(card)}
+for(const c of team){const card=document.createElement('article');card.className='driver';card.id='driver-'+c.number;card.style.setProperty('--accent',c.color);card.innerHTML=`<div class="driver-head"><span class="driver-number">${c.number}</span><div class="driver-identity"><h3>${c.name}</h3></div><span class="age">연결 대기</span></div><div class="speed-row"><span class="speed">—</span><span class="speed-unit">KM/H</span><svg class="spark" viewBox="0 0 120 44" preserveAspectRatio="none"><path fill="none" stroke="${c.color}" stroke-width="1.8"/></svg></div><div class="rpm-row"><span>엔진</span><div><strong class="rpm">—</strong> rpm</div></div><div class="rpm-bar"><i></i></div><div class="pedals"><div><div class="pedal-label">가속 <b class="throttle">—</b></div><div class="pedal-bar throttle"><i></i></div></div><div><div class="pedal-label">브레이크 <b class="brake">—</b></div><div class="pedal-bar brake"><i></i></div></div></div><div class="sensors"><div class="sensor"><small>조향</small><b class="steer">—</b><em>°</em></div><div class="sensor"><small>냉각수</small><b class="coolant">—</b><em>℃</em></div><div class="sensor"><small>오일</small><b class="oil">—</b><em>℃</em></div></div><div class="driver-bottom"><div class="rank" title="GPS 주행 기준으로 계산한 추정 순위"><span class="rank-label">순위 대기</span><b>—</b></div><div>최근 랩<b class="last-lap">—</b></div><div>최고 랩<b class="best-lap">—</b></div><div>기어<b class="gear">—</b></div></div>`;$('cards').append(card)}
 const canvas=$('map'),ctx=canvas.getContext('2d'),image=new Image();
 let mapSize={width:0,height:0},mapVisible=true;
 // Geometry changes on resize, not on every animation frame or scroll tick.
@@ -80,10 +80,14 @@ function draw(){
  }ctx.globalAlpha=1;
 }
 function renderRanking(card,c,now){const set=(q,v)=>setText(card.querySelector(q),v);
- const validRank=c?.rank&&c?.rank.session_id===state.session?.id&&now-c?.rank.received_ms>=0&&now-c?.rank.received_ms<10000;
- const officialPosition=Number(c?.rank?.position),useOfficial=validRank&&Number.isInteger(officialPosition)&&officialPosition>0;
- set('.rank-label',useOfficial?'공식 순위':'GPS 추정');card.querySelector('.rank').title=useOfficial?'공식 타이밍 피드 · '+c?.rank.session_name:'공식 순위 대기 · GPS 주행 기준으로 계산한 추정 순위';
- set('.rank b',useOfficial?'P'+officialPosition:c?.live_rank?.position?'P'+c?.live_rank.position:'—');set('.last-lap',lap(validRank?c?.rank.last_ms:null));set('.best-lap',lap(validRank?c?.rank.best_ms:null));
+ const validResult=c?.rank&&c.rank.session_id===state.session?.id&&now-c.rank.received_ms>=0&&now-c.rank.received_ms<10000;
+ const timingPosition=Number(c?.rank?.position),useTiming=validResult&&Number.isInteger(timingPosition)&&timingPosition>0;
+ const live=c?.live_rank,hasLive=Number.isInteger(live?.position)&&live.position>0;
+ set('.rank-label',hasLive?'리더보드':useTiming?'타이밍 순위':'순위 대기');
+ card.querySelector('.rank').title=hasLive?'JP-RACE 지도와 같은 랩·주행진척 정렬':useTiming?'지도 데이터 대기 · 타이밍 결과 '+c.rank.session_name:'순위 데이터 대기';
+ set('.rank b',hasLive?'P'+live.position:useTiming?'P'+timingPosition:'—');
+ // Official lap fields can legitimately be zero before a timed lap is completed.
+ set('.last-lap',lap(validResult?c.rank.last_ms:hasLive?live.last_ms:null));set('.best-lap',lap(validResult?c.rank.best_ms:hasLive?live.best_ms:null));
 }
 function render(){if(!state)return;const now=serverNow(),age=now-state.last_frame_ms;
  setText($('map-quality'),'실시간 위치');$('map-quality').title='GPS 시각 기준 보간 · 표시 버퍼 '+fmt(motionBufferMs/1000,2)+'초';
