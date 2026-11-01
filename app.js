@@ -89,7 +89,18 @@ function renderRanking(card,c,now){const set=(q,v)=>setText(card.querySelector(q
  // Official lap fields can legitimately be zero before a timed lap is completed.
  set('.last-lap',lap(validResult?c.rank.last_ms:hasLive?live.last_ms:null));set('.best-lap',lap(validResult?c.rank.best_ms:hasLive?live.best_ms:null));
 }
+function renderRaceStatus(now){
+ const status=state.race_status;
+ // A newly received replay must not make an old heartbeat look current.
+ const fresh=status&&status.session_id===state.session?.id&&[status.received_ms,status.packet_ms,status.source_ms].every(t=>Number.isFinite(t)&&now-t>=0&&now-t<10000);
+ const labels={green:['녹기','#baff41'],yellow:['황기 · 주의','#ffd35b'],red:['적기 · 경기 중단','#ff7474'],finish:['체커기','#edf1f4']};
+ const value=fresh?labels[String(status.flag??'').toLowerCase()]:null;
+ setText($('race-status'),value?value[0]:'상태 확인 중');
+ $('race-status').style.color=value?value[1]:'#9aa7b3';
+ $('race-status').title=value?'경기 상태 · 타이밍 피드':'경기 상태 미확인 · 일치하는 최신 상태 데이터 대기';
+}
 function render(){if(!state)return;const now=serverNow(),age=now-state.last_frame_ms;
+ renderRaceStatus(now);
  setText($('map-quality'),'실시간 위치');$('map-quality').title='GPS 시각 기준 보간 · 표시 버퍼 '+fmt(motionBufferMs/1000,2)+'초';
  const transportLost=failedPolls>=2&&performance.now()-lastHttpSuccess>5000;
  setAttribute($('connection'),'class','pill '+(age<2500&&!state.catching_up&&!transportLost?'live':'stale'));setText($('connection'),transportLost?'화면 재연결 중':state.catching_up?'동기화 중':age<2500?'LIVE':'수신 대기');

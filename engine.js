@@ -15,7 +15,7 @@ Buffer.prototype.writeUInt32LE=function(v,p){new DataView(this.buffer,this.byteO
 
 let cfg=await (await fetch('./config.json',{cache:'no-store'})).json(),proto=cfg.wsProtocol.packet;
 const colors={'21':'#baff41','55':'#58caff','56':'#ffb35b','85':'#c999ff'},cars=new Map();
-let raceConfig={raceStartTime:Date.parse(cfg.sessionInfo.race_start_timestamp+'Z'),raceFinishTime:Date.parse(cfg.sessionInfo.race_end_timestamp+'Z'),raceMode:cfg.sessionInfo.race_mode},pending=Buffer.alloc(0),frames=0,lastFrame=0,error=null,official=null,recording=false;
+let raceConfig={raceStartTime:Date.parse(cfg.sessionInfo.race_start_timestamp+'Z'),raceFinishTime:Date.parse(cfg.sessionInfo.race_end_timestamp+'Z'),raceMode:cfg.sessionInfo.race_mode},pending=Buffer.alloc(0),frames=0,lastFrame=0,error=null,official=null,raceStatus=null,recording=false;
 for(const e of cfg.entries)cars.set(e.device_serial,{serial:e.device_serial,number:e.entry_num,name:e.driver_name,team:e.team_name,focus:/\bzic\b/i.test(e.team_name),color:colors[e.entry_num]??'#8393a7',can:{},history:[],lapOffset:e.num_laps_offset??0,positionHistory:[]});
 let minSourceOffset=Infinity;
 function leaderboardAt(now){
@@ -78,6 +78,7 @@ function packet(b,received){
       official={class:d.ClassName,session:d.SessionName,received_ms:received};
       // Clear absent/mismatched rows too: never retain a prior result as current.
       const matches=officialSessionMatches(d);
+      raceStatus=matches&&d.heartbeat?{session_id:cfg.sessionInfo.id,flag:d.heartbeat.flag,source_ms:d.heartbeat.timestamp,packet_ms:d.timestamp,received_ms:received}:null;
       for(const c of cars.values()){
         c.rank=null;
         const r=matches&&Array.isArray(d.ranking)?d.ranking.find(r=>Number(r.RacerNumber)===Number(c.number)&&normalizeDriverName(r.RacerName)===normalizeDriverName(c.name)):null;
@@ -106,7 +107,7 @@ function snapshot(compact,positionCursor=null){const now=Date.now();
     if(positions.length)positionCursor?.set(c.serial,positions.at(-1)[0]);
     return {serial:c.serial,number:c.number,name:c.name,focus:c.focus,color:c.color,data:c.data?{lat:c.data.lat,lon:c.data.lon,speed:c.data.speed}:null,source_ms:c.source_ms,received_ms:c.received_ms,positions,...(c.focus?{can:Object.fromEntries(sensorNames.filter(k=>c.can[k]).map(k=>[k,{value:c.can[k].value,received_ms:c.can[k].received_ms}])),history:positionCursor?c.history.slice(-2):c.history,rank:c.rank,live_rank:c.live_rank}:{})};
   }):[...cars.values()];
-  return {now,last_frame_ms:lastFrame,frames,catching_up:false,recording:recording,capture_end:null,track:cfg?.trackInfo,session:cfg?.sessionInfo,official_feed:official,cars:payloadCars,error};
+  return {now,last_frame_ms:lastFrame,frames,catching_up:false,recording:recording,capture_end:null,track:cfg?.trackInfo,session:cfg?.sessionInfo,official_feed:official,race_status:raceStatus,cars:payloadCars,error};
 }
 let socket,clientId='',subscribed=false,retry=0,reconnectTimer,closed=false;
 const cursor=new Map();
@@ -127,7 +128,7 @@ async function refreshConfiguration(){
  try{const r=await fetch('./config.json?v='+Date.now(),{cache:'no-store'});if(!r.ok)return;const next=await r.json();if(configurationKey(next)===configurationKey(cfg))return;
   if(!next.sessionInfo?.id||!Array.isArray(next.entries)||(next.entries.length===0&&next.sessionInfo.num_entries!==0)||!next.wsUrl?.startsWith('wss://'))throw Error('Invalid session configuration');
   clearTimeout(reconnectTimer);const previous=socket;socket=null;if(previous)previous.close();
-  cfg=next;proto=cfg.wsProtocol.packet;cars.clear();cursor.clear();official=null;error=null;lastFrame=0;minSourceOffset=Infinity;
+  cfg=next;proto=cfg.wsProtocol.packet;cars.clear();cursor.clear();official=null;raceStatus=null;error=null;lastFrame=0;minSourceOffset=Infinity;
   raceConfig={raceStartTime:Date.parse(cfg.sessionInfo.race_start_timestamp+'Z'),raceFinishTime:Date.parse(cfg.sessionInfo.race_end_timestamp+'Z'),raceMode:cfg.sessionInfo.race_mode};
   for(const e of cfg.entries)cars.set(e.device_serial,{serial:e.device_serial,number:e.entry_num,name:e.driver_name,team:e.team_name,focus:/\bzic\b/i.test(e.team_name),color:colors[e.entry_num]??'#8393a7',can:{},history:[],lapOffset:e.num_laps_offset??0,positionHistory:[]});
   if(recording)queue.push({recordId,line:JSON.stringify({kind:'config',at:new Date().toISOString(),config:cfg})+'\n'});
