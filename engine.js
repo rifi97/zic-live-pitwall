@@ -74,6 +74,19 @@ function packet(b,received){
   }else if(type==='jsonPacket'){
     const d=JSON.parse(b.subarray(proto[type].jsonString.pos).toString().replace(/\0+$/,''));
     if(d.cmdType==='sessionConfig'&&d.sessionId===cfg.sessionInfo.id)raceConfig=d;
+    if(d.cmdType==='entryList'&&d.sessionId===cfg.sessionInfo.id&&Array.isArray(d.entries)){
+      for(const e of d.entries){
+        const c=cars.get(e.deviceSerial);
+        // Bind updates to the subscribed roster; never attach another driver's history.
+        if(!c||String(c.number)!==String(e.entryNum))continue;
+        if(Number.isInteger(e.numLapsOffset))c.lapOffset=e.numLapsOffset;
+        if(Number.isInteger(e.state))c.entryState=e.state;
+        if(typeof e.driverName==='string')c.name=e.driverName;
+        if(typeof e.teamName==='string'){c.team=e.teamName;c.focus=/\bzic\b/i.test(e.teamName);}
+        c.color=c.focus?(colors[c.number]??'#8393a7'):'#8393a7';
+        c.liveEntryMetadata=true;
+      }
+    }
     if(d.cmdType==='rmResult'){
       official={class:d.ClassName,session:d.SessionName,received_ms:received};
       // Clear absent/mismatched rows too: never retain a prior result as current.
@@ -125,8 +138,18 @@ const configurationKey=c=>JSON.stringify([c.wsUrl,c.sessionInfo.id,c.entries.map
 let refreshing=false;
 async function refreshConfiguration(){
  if(refreshing)return;refreshing=true;
- try{const r=await fetch('./config.json?v='+Date.now(),{cache:'no-store'});if(!r.ok)return;const next=await r.json();if(configurationKey(next)===configurationKey(cfg))return;
+ try{const r=await fetch('./config.json?v='+Date.now(),{cache:'no-store'});if(!r.ok)return;const next=await r.json();
   if(!next.sessionInfo?.id||!Array.isArray(next.entries)||(next.entries.length===0&&next.sessionInfo.num_entries!==0)||!next.wsUrl?.startsWith('wss://'))throw Error('Invalid session configuration');
+  if(configurationKey(next)===configurationKey(cfg)){
+    // Metadata changes within a session must not reset the socket, GPS or recording.
+    const timing=c=>JSON.stringify([c.sessionInfo.race_start_timestamp,c.sessionInfo.race_end_timestamp,c.sessionInfo.race_mode]);
+    const changed=timing(next)!==timing(cfg)||JSON.stringify(next.entries.map(e=>[e.device_serial,e.num_laps_offset,e.state]))!==JSON.stringify(cfg.entries.map(e=>[e.device_serial,e.num_laps_offset,e.state]));
+    if(timing(next)!==timing(cfg))raceConfig={raceStartTime:Date.parse(next.sessionInfo.race_start_timestamp+'Z'),raceFinishTime:Date.parse(next.sessionInfo.race_end_timestamp+'Z'),raceMode:next.sessionInfo.race_mode};
+    for(const e of next.entries){const c=cars.get(e.device_serial);if(c&&!c.liveEntryMetadata){if(Number.isInteger(e.num_laps_offset))c.lapOffset=e.num_laps_offset;if(Number.isInteger(e.state))c.entryState=e.state;}}
+    cfg=next;
+    if(changed&&recording)queue.push({recordId,line:JSON.stringify({kind:'config',at:new Date().toISOString(),config:cfg})+'\n'});
+    return;
+  }
   clearTimeout(reconnectTimer);const previous=socket;socket=null;if(previous)previous.close();
   cfg=next;proto=cfg.wsProtocol.packet;cars.clear();cursor.clear();official=null;raceStatus=null;error=null;lastFrame=0;minSourceOffset=Infinity;
   raceConfig={raceStartTime:Date.parse(cfg.sessionInfo.race_start_timestamp+'Z'),raceFinishTime:Date.parse(cfg.sessionInfo.race_end_timestamp+'Z'),raceMode:cfg.sessionInfo.race_mode};
